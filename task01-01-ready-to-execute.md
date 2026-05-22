@@ -69,12 +69,29 @@ python lbm_karman-ng.py --save-every 1
 ```
 
 **3. Train the model** using `model-experiments`
-(branch: `dev-C04-helper-scripts`):
+(branch: `dev-C04-helper-scripts`).
+
+The simulator dumps, per saved step, a **pair of `.npy` files** of shape
+`(Nx, Ny, 9)` — `fpre_<step>.npy` (pre-collision) and `fpost_<step>.npy`
+(post-collision, BGK). This differs from the synthetic Taylor-Green dataset
+(`train-d4equivariant.sh`), which is a single `.npz` of flat `(N, 9)` vectors.
+`model-experiments` now bridges that format: `run_all.py --data-dir <dir>`
+loads the per-step `.npy` pairs, flattens `(Nx,Ny,9) → (Nx*Ny,9)`,
+sub-samples, drops unphysical (negative) samples, and reconstructs `f_eq`.
+
+Run the Karman-specific training script (it points `--data-dir` at the
+Snellius data path and passes `--skip-simulate`, since the model is applied
+back to the simulator in step 4's separate repo):
 ```bash
 cd ../model-experiments
 git checkout dev-C04-helper-scripts
-scripts/train-d4equivariant.sh
+# Defaults to DATA_DIR=/gpfs/scratch1/shared/scur0076/output-lbm-data-02-30000steps-data.per.step-npy
+# Override sub-sampling via env vars: SAMPLES_PER_STEP, STEP_STRIDE, MAX_STEPS
+scripts/train-d4equivariant-karman.sh
 ```
+
+> The original `scripts/train-d4equivariant.sh` still works unchanged for the
+> synthetic dataset.
 
 **4. Apply the trained model back** to the simulator
 (branch: `dev-C04-helper-scripts`):
