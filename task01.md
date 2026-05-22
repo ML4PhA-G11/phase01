@@ -1,7 +1,7 @@
 this project is a glue project to reproduce what we have done for creating data from simulators, using the data to train models, and then apply the models one by one back to the corresponding simulators.
 
 # components of source code: remote repositories
-simulator: git@github.com:ML4PhA-G11/phase01.git
+simulator: git@github.com:ML4PhA-G11/simulators.git
 training: git@github.com:ML4PhA-G11/model-experiments.git
 applying models back: git@github.com:ML4PhA-G11/Apply-NN-KarmanVortexStreet.git
 data: git@github.com:ML4PhA-G11/data.git (data includes data generated from simulator and trained models, so we do not need to re-run simulators and training) (the repo is gfs based)
