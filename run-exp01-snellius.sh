@@ -72,7 +72,7 @@ APPLY_DIR="${APPLY_DIR:-${HERE}/../Apply-NN-KarmanVortexStreet}"
 
 # --- Experiment configuration ------------------------------------------------
 BRANCH="${BRANCH:-dev-C04-helper-scripts}"
-DATA_DIR="${DATA_DIR:-/gpfs/scratch1/shared/scur0076/output-lbm-data-04-40000steps-data.per.1000step-gpu-npy/gpu_res1000_n40000}"
+DATA_DIR="${DATA_DIR:-/gpfs/scratch1/shared/scur0076/output-lbm-data-04-40000steps-data.per.100step-gpu-npy/gpu_res1000_n40000}"
 SAVE_EVERY="${SAVE_EVERY:-1}"          # simulator dump cadence (step 2)
 N_STEPS="${N_STEPS:-30000}"            # simulator timesteps (step 2)
 
