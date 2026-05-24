@@ -115,6 +115,7 @@ log "Step 4: applying model (branch ${BRANCH})"
     cd "${APPLY_DIR}"
     git checkout "${BRANCH}"
     uv run python apply-nn.py \
+        --animate \
         --model-path "${MODEL_PATH}" \
         --data-dir "${DATA_DIR}" \
         --out-dir "${EVAL_OUT_DIR}"
