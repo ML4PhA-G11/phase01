@@ -14,6 +14,7 @@
 #   ./run-exp01-snellius.sh train            # only step 3 (GPU check + train)
 #   ./run-exp01-snellius.sh apply            # only step 4
 #   ./run-exp01-snellius.sh data train       # any subset, in order data→train→apply
+#   ./run-exp01-snellius.sh --dry-run        # show resolved paths + what would run
 #
 # This drives the commands directly. To run under SLURM, wrap the invocation,
 # e.g.:  sbatch --time=08:00:00 --gpus=1 run-exp01-snellius.sh train
@@ -24,24 +25,37 @@
 # =============================================================================
 set -euo pipefail
 
-# --- Stage selection (positional args) --------------------------------------
+# --- Argument parsing -------------------------------------------------------
 RUN_DATA=false
 RUN_TRAIN=false
 RUN_APPLY=false
+DRY_RUN=false
+positional=()
 
-if (( $# == 0 )); then
+for arg in "$@"; do
+    case "$arg" in
+        -n|--dry-run) DRY_RUN=true ;;
+        -h|--help)
+            sed -n '2,22p' "${BASH_SOURCE[0]}" | sed 's/^# \?//'
+            exit 0
+            ;;
+        -*)
+            echo "ERROR: unknown option '$arg'" >&2
+            exit 2
+            ;;
+        *) positional+=("$arg") ;;
+    esac
+done
+
+if (( ${#positional[@]} == 0 )); then
     RUN_DATA=true; RUN_TRAIN=true; RUN_APPLY=true
 else
-    for stage in "$@"; do
+    for stage in "${positional[@]}"; do
         case "$stage" in
             all)              RUN_DATA=true;  RUN_TRAIN=true; RUN_APPLY=true ;;
             data|step1|step2) RUN_DATA=true ;;
             train|step3)      RUN_TRAIN=true ;;
             apply|step4)      RUN_APPLY=true ;;
-            -h|--help)
-                sed -n '2,21p' "${BASH_SOURCE[0]}" | sed 's/^# \?//'
-                exit 0
-                ;;
             *)
                 echo "ERROR: unknown stage '$stage'. Valid: data | train | apply | all" >&2
                 exit 2
@@ -71,18 +85,59 @@ export MAX_STEPS="${MAX_STEPS:-}"
 # Where the apply step writes its evaluation results.
 EVAL_OUT_DIR="${EVAL_OUT_DIR:-${APPLY_DIR}/eval_results}"
 
-log() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
+log()  { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
+dry()  { printf '   \033[33m[dry-run]\033[0m %s\n' "$*"; }
+
+# Run a command, or just echo it in dry-run mode. Use for any side-effecting
+# command (mkdir, module load, ...).
+maybe() {
+    if $DRY_RUN; then dry "$*"; else "$@"; fi
+}
+
+# Run a command inside a subshell rooted at <cwd>, or echo the equivalent
+# in dry-run mode. Use for heavy stage commands (python, training, apply).
+exec_in() {
+    local cwd="$1"; shift
+    if $DRY_RUN; then
+        dry "(cd $cwd && $*)"
+    else
+        ( cd "$cwd" && "$@" )
+    fi
+}
+
+# --- Plan summary (printed in both real and dry runs) -----------------------
+on_off() { $1 && echo "✓" || echo "·"; }
+
+cat <<EOF
+
+============================================================
+ Exp01 plan $($DRY_RUN && echo '(DRY RUN — no side effects)')
+============================================================
+ Stages:     $(on_off $RUN_DATA) data   $(on_off $RUN_TRAIN) train   $(on_off $RUN_APPLY) apply
+ Branch:     ${BRANCH}
+ Paths:
+   phase01 (HERE)    : ${HERE}
+   simulator         : ${SIM_DIR}
+   model-experiments : ${ME_DIR}
+   apply             : ${APPLY_DIR}
+   DATA_DIR          : ${DATA_DIR}
+   EVAL_OUT_DIR      : ${EVAL_OUT_DIR}
+   MODEL_PATH        : ${MODEL_PATH:-<auto: newest model.keras under ${ME_DIR}/artifacts-run-all-tensorflow/*karman*>}
+ Sim params:  N_STEPS=${N_STEPS}  SAVE_EVERY=${SAVE_EVERY}
+ Train subs.: SAMPLES_PER_STEP=${SAMPLES_PER_STEP}  STEP_STRIDE=${STEP_STRIDE}  MAX_STEPS=${MAX_STEPS:-<none>}
+============================================================
+EOF
 
 # --- Optional Snellius environment setup ------------------------------------
 # Load modules / activate an environment here if your site needs it, e.g.:
 #   module load 2023; module load Python/3.11.3-GCCcore-12.3.0
 # Left as a hook; uncomment/edit as appropriate for your account.
-module load 2025
-module load CUDA/12.8.0
+maybe module load 2025
+maybe module load CUDA/12.8.0
 if [[ -n "${SNELLIUS_MODULES:-}" ]]; then
     log "Loading modules: ${SNELLIUS_MODULES}"
     # shellcheck disable=SC1090
-    module load ${SNELLIUS_MODULES}
+    maybe module load ${SNELLIUS_MODULES}
 fi
 
 # =============================================================================
@@ -91,6 +146,8 @@ fi
 if $RUN_DATA; then
     log "Step 1: checking for simulator data in ${DATA_DIR}"
 
+    # Glob is read-only — always do it, even in dry-run, so the report below
+    # accurately reflects whether step 2 would actually generate anything.
     shopt -s nullglob
     existing=( "${DATA_DIR}"/fpre_*.npy )
     shopt -u nullglob
@@ -98,16 +155,13 @@ if $RUN_DATA; then
     if (( ${#existing[@]} > 0 )); then
         log "Found ${#existing[@]} fpre_*.npy files — using existing data (skipping generation)."
     else
-        log "Step 2: no data found — regenerating with the simulator (${N_STEPS} steps, --save-every ${SAVE_EVERY})."
-        mkdir -p "${DATA_DIR}"
-        (
-            cd "${SIM_DIR}"
-            python lbm_karman-ng.py \
-                --n-steps "${N_STEPS}" \
-                --save-every "${SAVE_EVERY}" \
-                --out-dir "${DATA_DIR}"
-        )
-        log "Data generation complete -> ${DATA_DIR}"
+        log "Step 2: no data found — would regenerate with the simulator (${N_STEPS} steps, --save-every ${SAVE_EVERY})."
+        maybe mkdir -p "${DATA_DIR}"
+        exec_in "${SIM_DIR}" python lbm_karman-ng.py \
+            --n-steps "${N_STEPS}" \
+            --save-every "${SAVE_EVERY}" \
+            --out-dir "${DATA_DIR}"
+        $DRY_RUN || log "Data generation complete -> ${DATA_DIR}"
     fi
 else
     log "Skipping data stage (step 1+2)."
@@ -120,17 +174,11 @@ if $RUN_TRAIN; then
     # First: verify TF can actually see and use the GPU in this environment, so
     # we fail fast here instead of hours into training on CPU.
     log "Step 3a: verifying TensorFlow GPU availability"
-    (
-        cd "${ME_DIR}"
-        git checkout "${BRANCH}"
-        bash scripts/cuda-gpu-tensorflow-enabled.sh
-    )
+    exec_in "${ME_DIR}" git checkout "${BRANCH}"
+    exec_in "${ME_DIR}" bash scripts/cuda-gpu-tensorflow-enabled.sh
 
     log "Step 3b: training (branch ${BRANCH}) with DATA_DIR=${DATA_DIR}"
-    (
-        cd "${ME_DIR}"
-        scripts/train-d4equivariant-karman.sh
-    )
+    exec_in "${ME_DIR}" scripts/train-d4equivariant-karman.sh
 else
     log "Skipping train stage (step 3)."
 fi
@@ -141,7 +189,8 @@ fi
 if $RUN_APPLY; then
     # Resolve the model to apply. Honour an explicit MODEL_PATH override (handy
     # when re-running just the apply stage); otherwise pick the newest
-    # model.keras under the karman run dirs.
+    # model.keras under the karman run dirs. The find is read-only, so we run
+    # it in dry-run too — useful to show which artifact would be picked up.
     if [[ -z "${MODEL_PATH:-}" ]]; then
         log "Locating the trained model"
         MODEL_PATH="$(
@@ -152,24 +201,29 @@ if $RUN_APPLY; then
         )"
     fi
     if [[ -z "${MODEL_PATH}" || ! -f "${MODEL_PATH}" ]]; then
-        echo "ERROR: no trained model.keras found under ${ME_DIR}/artifacts-run-all-tensorflow" >&2
-        echo "       (set MODEL_PATH=/path/to/model.keras to override.)" >&2
-        exit 1
+        msg="no trained model.keras found under ${ME_DIR}/artifacts-run-all-tensorflow"
+        if $DRY_RUN; then
+            log "WARN: ${msg} — apply would fail at runtime unless step 3 produces one first."
+            MODEL_PATH="<unresolved>"
+        else
+            echo "ERROR: ${msg}" >&2
+            echo "       (set MODEL_PATH=/path/to/model.keras to override.)" >&2
+            exit 1
+        fi
     fi
     log "Trained model: ${MODEL_PATH}"
 
     log "Step 4: applying model (branch ${BRANCH})"
-    (
-        cd "${APPLY_DIR}"
-        git checkout "${BRANCH}"
-        uv run python apply-nn.py \
-            --animate \
-            --model-path "${MODEL_PATH}" \
-            --data-dir "${DATA_DIR}" \
-            --out-dir "${EVAL_OUT_DIR}"
-    )
+    exec_in "${APPLY_DIR}" git checkout "${BRANCH}"
+    exec_in "${APPLY_DIR}" uv run python apply-nn.py \
+        --animate \
+        --model-path "${MODEL_PATH}" \
+        --data-dir "${DATA_DIR}" \
+        --out-dir "${EVAL_OUT_DIR}"
 
-    log "Exp01 complete. Evaluation results -> ${EVAL_OUT_DIR}"
+    $DRY_RUN || log "Exp01 complete. Evaluation results -> ${EVAL_OUT_DIR}"
 else
     log "Skipping apply stage (step 4)."
 fi
+
+$DRY_RUN && log "Dry run finished — no side effects performed."
