@@ -43,9 +43,8 @@ log() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 # Load modules / activate an environment here if your site needs it, e.g.:
 #   module load 2023; module load Python/3.11.3-GCCcore-12.3.0
 # Left as a hook; uncomment/edit as appropriate for your account.
-module load 2024
-# TODO: newer than 12.6.3
-module load CUDA/12.6.0
+module load 2025
+module load CUDA/12.8.0
 if [[ -n "${SNELLIUS_MODULES:-}" ]]; then
     log "Loading modules: ${SNELLIUS_MODULES}"
     # shellcheck disable=SC1090
@@ -79,10 +78,18 @@ fi
 # =============================================================================
 # Step 3. Train the D4-equivariant model on the simulator data
 # =============================================================================
-log "Step 3: training (branch ${BRANCH}) with DATA_DIR=${DATA_DIR}"
+# First: verify TF can actually see and use the GPU in this environment, so we
+# fail fast here instead of hours into training on CPU.
+log "Step 3a: verifying TensorFlow GPU availability"
 (
     cd "${ME_DIR}"
     git checkout "${BRANCH}"
+    bash scripts/cuda-gpu-tensorflow-enabled.sh
+)
+
+log "Step 3b: training (branch ${BRANCH}) with DATA_DIR=${DATA_DIR}"
+(
+    cd "${ME_DIR}"
     scripts/train-d4equivariant-karman.sh
 )
 
